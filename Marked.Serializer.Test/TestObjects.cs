@@ -9,6 +9,18 @@ namespace Marked.Serializer.Test
         public float SingleValue { get; set; }
     }
 
+    public class ComplexTestObject
+    {
+        public int IntegerValue { get; set; }
+        public ComplexChildObject Child { get; set; }
+    }
+
+    public class ComplexChildObject
+    {
+        public string Text { get; set; }
+        public ComplexTestObject Parent { get; set; }
+    }
+
     public class DirectCycleTestObject
     {
         public int Value { get; set; }

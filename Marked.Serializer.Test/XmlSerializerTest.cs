@@ -38,6 +38,41 @@ namespace Marked.Serializer.Test
         }
 
         [TestMethod]
+        public void TestComplexSerializer()
+        {
+            var test = new ComplexTestObject
+            {
+                IntegerValue = 4,
+                Child = new ComplexChildObject
+                {
+                    Text = "Test"
+                }
+            };
+
+            var serialized = serializer.SerializeToString(test);
+            var newObj = serializer.Deserialize<ComplexTestObject>(serialized);
+
+            Assert.AreEqual(test.IntegerValue, newObj.IntegerValue);
+            Assert.AreEqual(test.Child.Text, newObj.Child.Text);
+        }
+
+        [TestMethod]
+        public void TestSkipCycle()
+        {
+            var test = new ComplexTestObject
+            {
+                Child = new ComplexChildObject()
+            };
+            test.Child.Parent = test;
+
+            var serialized = serializer.SerializeToString(test);
+            var newObj = serializer.Deserialize<ComplexTestObject>(serialized);
+
+            Assert.AreEqual(newObj, newObj.Child.Parent);
+            Assert.AreEqual(newObj.Child, newObj.Child.Parent.Child);
+        }
+
+        [TestMethod]
         public void TestSelfCycle()
         {
             var test = new DirectCycleTestObject
@@ -57,14 +92,13 @@ namespace Marked.Serializer.Test
         {
             var test = new DirectCycleTestObject
             {
-                Value = 3
+                Child = null
             };
-            test.Child = null;
 
             var testString = serializer.SerializeToString(test);
             var newTestObject = serializer.Deserialize<DirectCycleTestObject>(testString);
 
-            Assert.AreEqual(newTestObject.Child, null);
+            Assert.AreEqual(null, newTestObject.Child);
         }
 
         [TestMethod]
