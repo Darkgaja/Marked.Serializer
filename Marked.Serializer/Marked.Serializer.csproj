@@ -40,6 +40,9 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="BinaryDataReader.cs" />
+    <Compile Include="BinaryDataToken.cs" />
+    <Compile Include="BinaryDataWriter.cs" />
     <Compile Include="CollectionFormatter.cs" />
     <Compile Include="CustomSerializerAttribute.cs" />
     <Compile Include="CycleUtility.cs" />
