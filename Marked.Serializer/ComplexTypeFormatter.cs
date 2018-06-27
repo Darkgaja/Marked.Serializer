@@ -3,49 +3,38 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Xml;
 using System.Reflection;
+using System.Runtime.Serialization;
 
 namespace Marked.Serializer
 {
-    public class ObjectSerializer : ISerializer
+    public class ComplexTypeFormatter : IFormatter
     {
         public Type Type { get; }
 
         private readonly Constructor constructor;
-        private readonly Field[] fields;
+        private readonly ObjectMember[] members;
 
         private delegate void SetterMethod(object obj);
         private delegate void ObjectSetter(object obj, object value);
 
-        public ObjectSerializer(Type type)
+        public ComplexTypeFormatter(Type type)
         {
             Type = type;
-            fields = GetFields(Type);
+            members = GetObjectMembers(Type);
             constructor = GetDefaultConstructor();
         }
 
-        private ISerializer SerializerFromTypeString(string typeString, out Type type)
+        private IFormatter FormatterFromReader(IDataReader reader, out Type type)
         {
-            type = Type.GetType(typeString);
-            return SerializerFromType(type);
+            return FormatterFactory.Get(type = reader.ReadType());
         }
 
-        private ISerializer SerializerFromType(Type type)
-        {
-            return SerializerFactory.Get(type);
-        }
-
-        private ISerializer SerializerFromReader(XmlReader reader, out Type type)
-        {
-            string typeString = reader.GetAttribute("Type");
-            return SerializerFromTypeString(typeString, out type);
-        }
-
-        public object Read(XmlReader reader, object o)
+        public object Read(IDataReader reader, object o)
         {
             var values = new Dictionary<string, object>();
             var cycleActions = new List<SetterMethod>();
 
-            foreach (var field in fields)
+            foreach (var field in members)
             {
                 if (field.HasGetter())
                 {
@@ -62,7 +51,7 @@ namespace Marked.Serializer
             {
                 if (constructor == null)
                 {
-                    o = Activator.CreateInstance(Type);
+                    o = FormatterServices.GetSafeUninitializedObject(Type);
                 }
                 else
                 {
@@ -70,7 +59,7 @@ namespace Marked.Serializer
                 }
             }
 
-            foreach (var field in fields)
+            foreach (var field in members)
             {
                 if (field.HasSetter())
                 {
@@ -88,38 +77,39 @@ namespace Marked.Serializer
             return o;
         }
         
-        private SetterMethod Read(XmlReader reader, Field field, object value, Dictionary<string, object> values)
+        private SetterMethod Read(IDataReader reader, ObjectMember field, object value, Dictionary<string, object> values)
         {
             string name = field.Name;
             if (!reader.IsEmptyElement)
             {
-                var serializerAttribute = field.Member.GetCustomAttribute<CustomSerializerAttribute>();
-                var serializer = serializerAttribute?.Serializer ?? SerializerFromReader(reader, out var type);
-                int.TryParse(reader.GetAttribute("Id"), out int cycleId);
+                var serializerAttribute = field.Member.GetCustomAttribute<CustomFormatterAttribute>(false);
+                var serializer = serializerAttribute?.Formatter ?? FormatterFromReader(reader, out var type);
+                int cycleId = reader.ReadId();
 
-                reader.ReadStartElement(name);
+                reader.ReadStartNode(name);
                 object cycleValue = values[name] = serializer.Read(reader, value);
                 if (CycleUtility.ValidCycleType(serializer.Type))
                 {
                     CycleUtility.GetInstance(reader).AddReference(cycleId, cycleValue);
                 }
-                reader.ReadEndElement();
+                reader.ReadEndNode(name);
+                // no setter method required
                 return null;
             }
             else
             {
-                SetterMethod cycleReader = ReadCyclicObject(reader, field.Set);
+                SetterMethod referenceReader = ReadReferencedObject(reader, field.Set);
                 values[name] = null;
-                reader.Read();
-                return cycleReader;
+                reader.ReadEmptyNode(field.Name);
+                return referenceReader;
             }
         }
 
-        private SetterMethod ReadCyclicObject(XmlReader reader, ObjectSetter setter)
+        private SetterMethod ReadReferencedObject(IDataReader reader, ObjectSetter setter)
         {
             var cycleUtility = CycleUtility.GetInstance(reader);
-            string refIdString = reader.GetAttribute("RefId");
-            if (int.TryParse(refIdString, out int id))
+            int id = reader.ReadReference();
+            if (id >= 0)
             {
                 return (obj) => setter(obj, cycleUtility.FromReference(id));
             }
@@ -129,22 +119,22 @@ namespace Marked.Serializer
             }
         }
 
-        public void Write(XmlWriter writer, object o)
+        public void Write(IDataWriter writer, object o)
         {
             if (CycleUtility.ValidCycleType(o.GetType()))
             {
                 var cycleUtil = CycleUtility.GetInstance(writer);
                 if (cycleUtil.TryGetReferenceId(o, out int id))
                 {
-                    writer.WriteAttributeString("RefId", id.ToString());
+                    writer.WriteReference(id);
                     return;
                 }
                 else
                 {
-                    writer.WriteAttributeString("Id", id.ToString());
+                    writer.WriteId(id);
                 }
             }
-            foreach (var field in fields)
+            foreach (var field in members)
             {
                 if (field.HasGetter())
                 {
@@ -154,20 +144,20 @@ namespace Marked.Serializer
             }
         }
 
-        private void Write(XmlWriter writer, Field field, object value)
+        private void Write(IDataWriter writer, ObjectMember field, object value)
         {
             string name = field.Name;
-            writer.WriteStartElement(name);
+            writer.WriteStartNode(name);
             if (value != null)
             {
                 var type = value.GetType();
-                var serializerAttribute = field.Member.GetCustomAttribute<CustomSerializerAttribute>();
-                var serializer = serializerAttribute?.Serializer ?? SerializerFactory.Get(type);
+                var customFormatterAttribute = field.Member.GetCustomAttribute<CustomFormatterAttribute>(false);
+                var formatter = customFormatterAttribute?.Formatter ?? FormatterFactory.Get(type);
 
-                WriteTypeString(writer, type);
-                serializer.Write(writer, value);
+                writer.WriteType(type);
+                formatter.Write(writer, value);
             }
-            writer.WriteEndElement();
+            writer.WriteEndNode(name);
         }
 
         private void WriteTypeString(XmlWriter writer, Type type)
@@ -179,7 +169,7 @@ namespace Marked.Serializer
         {
             var publicConstructors = Type.GetConstructors();
 
-            var defaultConstructor = publicConstructors.SingleOrDefault(e => e.GetCustomAttribute<SerializerConstructorAttribute>() != null);
+            var defaultConstructor = publicConstructors.SingleOrDefault(e => HasAttribute<SerializerConstructorAttribute>(e));
             if (defaultConstructor == null)
             {
                 defaultConstructor = Type.GetConstructor(Type.EmptyTypes);
@@ -190,14 +180,14 @@ namespace Marked.Serializer
                 return new Constructor(defaultConstructor, null);
             }
 
-            var attr = defaultConstructor.GetCustomAttribute<SerializerConstructorAttribute>();
+            var attr = defaultConstructor.GetCustomAttribute<SerializerConstructorAttribute>(false);
             return new Constructor(defaultConstructor, attr);
         }
 
-        private Field[] GetFields(Type type)
+        private ObjectMember[] GetObjectMembers(Type type)
         {
             if (type == typeof(object) || type == null)
-                return new Field[0];
+                return new ObjectMember[0];
 
             var publicFields = type.GetFields();
             var privateFields = type.GetFields(BindingFlags.Instance | BindingFlags.NonPublic);
@@ -207,25 +197,29 @@ namespace Marked.Serializer
 
             IEnumerable<FieldInfo> noIgnoreFields;
             IEnumerable<PropertyInfo> noIgnoreProperties;
-            if (type != Type || type.GetCustomAttribute(typeof(SerializerForceIncludeAttribute)) != null)
+            IEnumerable<ObjectMember> backingFields = null;
+            if (type != Type || HasAttribute<SerializerForceIncludeAttribute>(type))
             {
-                noIgnoreFields = privateFields.Concat(publicFields).Where(e => e.GetCustomAttribute(typeof(SerializerIncludeAttribute)) != null);
-                noIgnoreProperties = privateProperties.Concat(publicProperties).Where(e => e.GetCustomAttribute<SerializerIncludeAttribute>() != null);
+                noIgnoreFields = privateFields.Concat(publicFields).Where(e => HasAttribute<SerializerIncludeAttribute>(e));
+                noIgnoreProperties = privateProperties.Concat(publicProperties).Where(e => HasAttribute<SerializerIncludeAttribute>(e));
             }
             else
             {
-                var privateIncludeFields = privateFields.Where(e => e.GetCustomAttribute(typeof(SerializerIncludeAttribute)) != null);
+                var privateIncludeProperties = privateProperties.Where(e => HasAttribute<SerializerIncludeAttribute>(e));
+                var publicBackingProperties = publicProperties.Where(e => HasAttribute<SerializerUseBackingField>(e));
+                backingFields = publicBackingProperties
+                    .Select(e => new ObjectMember(GetBackingField(e), e.GetCustomAttribute<SerializerIncludeAttribute>(false) ?? new SerializerIncludeAttribute() { Name = e.Name }));
+                var allProperties = publicProperties.Except(publicBackingProperties).Concat(privateIncludeProperties);
+
+                noIgnoreProperties = allProperties.Where(e => !HasAttribute<SerializerIgnoreAttribute>(e));
+
+                var privateIncludeFields = privateFields.Where(e => HasAttribute<SerializerIncludeAttribute>(e));
                 var allFields = publicFields.Concat(privateIncludeFields);
 
-                noIgnoreFields = allFields.Where(e => e.GetCustomAttribute(typeof(SerializerIgnoreAttribute)) == null);
-
-                var privateIncludeProperties = privateProperties.Where(e => e.GetCustomAttribute<SerializerIncludeAttribute>() != null);
-                var allProperties = publicProperties.Concat(privateIncludeProperties);
-
-                noIgnoreProperties = allProperties.Where(e => e.GetCustomAttribute<SerializerIgnoreAttribute>() == null);
+                noIgnoreFields = allFields.Where(e => !HasAttribute<SerializerIgnoreAttribute>(e));
             }
 
-            return noIgnoreFields.Concat(noIgnoreProperties.Cast<MemberInfo>()).Select(e => new Field(e, e.GetCustomAttribute<SerializerIncludeAttribute>())).Concat(GetFields(type.BaseType)).ToArray();
+            return noIgnoreFields.Concat(noIgnoreProperties.Cast<MemberInfo>()).Select(e => new ObjectMember(e, e.GetCustomAttribute<SerializerIncludeAttribute>(false))).Concat(backingFields).Concat(GetObjectMembers(type.BaseType)).ToArray();
         }
 
         private object[] GetConstructorParameters(Dictionary<string, object> values, SerializerConstructorAttribute constructorAttribute)
@@ -233,7 +227,10 @@ namespace Marked.Serializer
             var parameters = new object[constructorAttribute?.Parameters?.Length ?? 0];
             for (int i = 0; i < parameters.Length; i++)
             {
-                parameters[i] = values[constructorAttribute.Parameters[i]];
+                if (values.TryGetValue(constructorAttribute.Parameters[i], out var parameter))
+                {
+                    parameters[i] = parameter;
+                }
             }
             return parameters;
         }
@@ -241,6 +238,11 @@ namespace Marked.Serializer
         private FieldInfo GetBackingField(PropertyInfo propertyInfo)
         {
             return propertyInfo.DeclaringType.GetField($"<{propertyInfo.Name}>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic);
+        }
+
+        private bool HasAttribute<T>(MemberInfo member) where T : Attribute
+        {
+            return member.GetCustomAttribute<T>(false) != null;
         }
 
         private class Constructor
@@ -255,14 +257,14 @@ namespace Marked.Serializer
             }
         }
 
-        private class Field
+        private class ObjectMember
         {
             public SerializerIncludeAttribute Attribute { get; set; }
             public MemberInfo Member { get; set; }
 
             public string Name => Attribute?.Name ?? Member.Name; //Attribute == null ? Member.Name : Attribute.Name ?? Member.Name;
 
-            public Field(MemberInfo member, SerializerIncludeAttribute attribute)
+            public ObjectMember(MemberInfo member, SerializerIncludeAttribute attribute)
             {
                 Member = member;
                 Attribute = attribute;

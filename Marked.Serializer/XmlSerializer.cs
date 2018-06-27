@@ -1,7 +1,6 @@
 ﻿using System;
 using System.IO;
 using System.Text;
-using System.Xml;
 
 namespace Marked.Serializer
 {
@@ -30,13 +29,13 @@ namespace Marked.Serializer
             if (obj == null)
                 throw new ArgumentNullException(nameof(obj));
 
-            using (XmlWriter writer = XmlWriter.Create(stream))
+            using (XmlDataWriter writer = new XmlDataWriter(stream))
             {
                 Serialize(writer, obj);
             }
         }
 
-        public void Serialize(XmlWriter writer, object obj)
+        public void Serialize(IDataWriter writer, object obj)
         {
             try
             {
@@ -46,12 +45,10 @@ namespace Marked.Serializer
                     throw new ArgumentNullException(nameof(obj));
 
                 var type = obj.GetType();
-                var serializer = SerializerFactory.Get(type);
-                writer.WriteStartDocument();
-                writer.WriteStartElement(type.Name);
-                serializer.Write(writer, obj);
-                writer.WriteEndElement();
-                writer.WriteEndDocument();
+                var formatter = FormatterFactory.Get(type);
+                writer.WriteStartNode(type.Name);
+                formatter.Write(writer, obj);
+                writer.WriteEndNode(type.Name);
                 CycleUtility.RemoveInstance(writer);
             }
             catch
@@ -76,7 +73,7 @@ namespace Marked.Serializer
             return Deserialize<T>(stream, null);
         }
 
-        public T Deserialize<T>(XmlReader reader)
+        public T Deserialize<T>(IDataReader reader)
         {
             if (reader == null)
                 throw new ArgumentNullException(nameof(reader));
@@ -97,36 +94,31 @@ namespace Marked.Serializer
 
         public T Deserialize<T>(Stream stream, object obj)
         {
-            using (XmlReader reader = XmlReader.Create(stream))
+            using (XmlDataReader reader = new XmlDataReader(stream))
             {
                 return Deserialize<T>(reader, obj);
             }
         }
 
-        public T Deserialize<T>(XmlReader reader, object obj)
+        public T Deserialize<T>(IDataReader reader, object obj)
         {
             object value = null;
-            try
-            {
-                if (!reader.IsEmptyElement)
-                {
-                    var serializer = SerializerFactory.Get(typeof(T));
-                    reader.MoveToContent();
-                    int id = int.TryParse(reader.GetAttribute("Id"), out int refId) ? refId : -1;
-                    reader.ReadStartElement();
-                    value = serializer.Read(reader, obj);
-                    if (id > -1)
-                    {
-                        CycleUtility.GetInstance(reader).AddReference(id, value);
-                    }
-                    reader.ReadEndElement();
-                }
-                CycleUtility.RemoveInstance(reader);
-            }
-            catch (Exception e)
-            {
+            var type = typeof(T);
 
+            if (!reader.IsEmptyElement)
+            {
+                var formatter = FormatterFactory.Get(type);
+                int id = reader.ReadId();
+                reader.ReadStartNode(type.Name);
+                value = formatter.Read(reader, obj);
+                if (id > -1)
+                {
+                    CycleUtility.GetInstance(reader).AddReference(id, value);
+                }
+                reader.ReadEndNode(type.Name);
             }
+            CycleUtility.RemoveInstance(reader);
+
             return (T)value;
         }
     }

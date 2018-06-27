@@ -5,7 +5,7 @@ using System.Xml;
 
 namespace Marked.Serializer
 {
-    public class PrimitiveSerializer : ISerializer
+    public class PrimitiveFormatter : IFormatter
     {
         private static Type[] SupportedTypes { get; } = new Type[]
             {
@@ -28,7 +28,7 @@ namespace Marked.Serializer
 
         public Type Type { get; }
 
-        public PrimitiveSerializer(Type type)
+        public PrimitiveFormatter(Type type)
         {
             if (!IsValid(type))
                 throw new InvalidCastException($"{type.Name} is not a primitive type");
@@ -36,34 +36,14 @@ namespace Marked.Serializer
             Type = type;
         }
 
-        public void Initialize()
+        public object Read(IDataReader reader, object o)
         {
-
+            return reader.ReadContent(Type);
         }
 
-        public object Read(XmlReader reader, object o)
+        public void Write(IDataWriter writer, object o)
         {
-            if (Type.IsEnum)
-            {
-                string enumString = reader.ReadContentAsString();
-                return Enum.Parse(Type, enumString);
-            }
-            else
-            {
-                return reader.ReadContentAs(Type, null);
-            }
-        }
-
-        public void Write(XmlWriter writer, object o)
-        {
-            if (o is IFormattable formattable)
-            {
-                writer.WriteValue(formattable.ToString(null, NumberFormatInfo.InvariantInfo));
-            }
-            else
-            {
-                writer.WriteValue(o);
-            }
+            writer.WriteContent(o);
         }
 
         public static bool IsValid(Type type)

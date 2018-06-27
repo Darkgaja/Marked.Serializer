@@ -6,10 +6,10 @@ namespace Marked.Serializer
 {
     public class CycleUtility
     {
-        private static readonly Dictionary<XmlReader, CycleUtility> readerCycles
-            = new Dictionary<XmlReader, CycleUtility>();
-        private static readonly Dictionary<XmlWriter, CycleUtility> writerCycles
-            = new Dictionary<XmlWriter, CycleUtility>();
+        private static readonly Dictionary<IDataReader, CycleUtility> readerCycles
+            = new Dictionary<IDataReader, CycleUtility>();
+        private static readonly Dictionary<IDataWriter, CycleUtility> writerCycles
+            = new Dictionary<IDataWriter, CycleUtility>();
         
         private int id = 0;
 
@@ -51,7 +51,7 @@ namespace Marked.Serializer
             return objects[refId];
         }
 
-        public static CycleUtility GetInstance(XmlReader reader)
+        public static CycleUtility GetInstance(IDataReader reader)
         {
             if (reader == null)
                 throw new ArgumentNullException(nameof(reader));
@@ -64,7 +64,7 @@ namespace Marked.Serializer
             return cycleUtility;
         }
 
-        public static CycleUtility GetInstance(XmlWriter writer)
+        public static CycleUtility GetInstance(IDataWriter writer)
         {
             if (writer == null)
                 throw new ArgumentNullException(nameof(writer));
@@ -95,13 +95,13 @@ namespace Marked.Serializer
             }
         }
 
-        public static void RemoveInstance(XmlWriter writer)
+        public static void RemoveInstance(IDataWriter writer)
         {
             GetInstance(writer)?.ExecuteCycleSetters();
             writerCycles.Remove(writer ?? throw new ArgumentNullException(nameof(writer)));
         }
 
-        public static void RemoveInstance(XmlReader reader)
+        public static void RemoveInstance(IDataReader reader)
         {
             GetInstance(reader)?.ExecuteCycleSetters();
             readerCycles.Remove(reader ?? throw new ArgumentNullException(nameof(reader)));
