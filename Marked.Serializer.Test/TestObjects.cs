@@ -21,5 +21,19 @@ namespace Marked.Serializer.Test
         public List<ListCycleTestObject> Children { get; set; }
     }
 
+    public class BackingFieldTestObject
+    {
+        [SerializerUseBackingField]
+        public string Value { get; }
 
+        public BackingFieldTestObject()
+        {
+            Value = null;
+        }
+
+        public BackingFieldTestObject(string value)
+        {
+            Value = value;
+        }
+    }
 }

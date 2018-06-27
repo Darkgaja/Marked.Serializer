@@ -51,5 +51,30 @@ namespace Marked.Serializer.Test
             
             Assert.AreEqual(newTestObject, newTestObject.Child);
         }
+
+        [TestMethod]
+        public void TestNull()
+        {
+            var test = new DirectCycleTestObject
+            {
+                Value = 3
+            };
+            test.Child = null;
+
+            var testString = serializer.SerializeToString(test);
+            var newTestObject = serializer.Deserialize<DirectCycleTestObject>(testString);
+
+            Assert.AreEqual(newTestObject.Child, null);
+        }
+
+        [TestMethod]
+        public void TestBackingField()
+        {
+            var test = new BackingFieldTestObject("BackingFieldTest");
+            var testString = serializer.SerializeToString(test);
+            var newTestObject = serializer.Deserialize<BackingFieldTestObject>(testString);
+
+            Assert.AreEqual(test.Value, newTestObject.Value);
+        }
     }
 }
