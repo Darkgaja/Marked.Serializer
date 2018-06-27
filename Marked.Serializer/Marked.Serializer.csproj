@@ -55,6 +55,8 @@
     <Compile Include="SerializerIgnoreAttribute.cs" />
     <Compile Include="SerializerIncludeAttribute.cs" />
     <Compile Include="SerializerUseBackingField.cs" />
+    <Compile Include="XmlDataReader.cs" />
+    <Compile Include="XmlDataWriter.cs" />
     <Compile Include="XmlSerializer.cs" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
